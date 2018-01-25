@@ -42,6 +42,12 @@ trait Compartment
 
   protected val plays: ScalaRoleGraph = new CachedScalaRoleGraph()
 
+  /**
+   * Object encapsulates runtime meta information of the object that is executed in the current dispatch.
+   * Role-Functions can use this object to determine a textual pseudonym of the caller-object.
+   */
+  protected var rtmeta = new RuntimeMetaInformation()
+  
   implicit def either2TorException[T](either: Either[_, T]): T = either.fold(
     l => {
       throw new RuntimeException(l.toString)
@@ -318,7 +324,20 @@ trait Compartment
       */
     def hasExtension[E <: AnyRef : ClassTag]: Boolean = isPlaying[E]
 
-    override def applyDynamic[E, A](name: String)(args: A*)(implicit dispatchQuery: DispatchQuery = DispatchQuery.empty): Either[SCROLLError, E] = {
+/**
+     * Function accesses the Role-playing graph of the associated Compartment-instance 
+     * (i.e. the "outer object" of this Player-instance) to get the role-object
+     * that the function-call (arguments "name" and "args") should be dispatched to according to the
+     * passed dispatchQuery-Object. Finally, the function call is dispatched to the found 
+     * role-object and the obtained result is returned.
+     * 
+     * @param name function-name used in the to-be-dispatched function call
+     * @param args arguments used in the to-be-dispatched function call
+     * @param dispatchQuery object is used to filter the role-playing graph during dispatch
+     * @param callerTextualPseudonym object provides the textual pseudonym of the caller of the function
+     * @return Result of the function that the call was dispatched to encapsulated in an Either-object.
+     */
+    def performSCROLLDispatch[E, A](name: String)(args: Seq[A])(implicit dispatchQuery: DispatchQuery = DispatchQuery.empty): Either[SCROLLError, E] = {
       val core = getCoreFor(wrapped).last
       dispatchQuery.filter(plays.getRoles(core)).foreach(r => {
         ReflectiveHelper.findMethod(r, name, args).foreach(fm => {
@@ -332,6 +351,24 @@ trait Compartment
       Left(RoleNotFound(core.toString, name, args))
     }
 
+    /**
+     * The function-call (arguments "name" and "args") is dispatched to a role-object using SCROLLs dispatch mechanism.
+     * Optionally, a pseudonym is associated to the caller object and made available to the role-object by means of a
+     * meta-information data structure in the compartment-instance. 
+     *
+     * @param name function-name used in the to-be-dispatched function call
+     * @param args arguments used in the to-be-dispatched function call
+     * @param dispatchQuery object is used to filter the role-playing graph during dispatch
+     * @param callerTextualPseudonym object provides the textual pseudonym of the caller of the function
+     * @return Result of the function that the call was dispatched to encapsulated in an Either-object. 
+     */
+    override def applyDynamic[E, A](name: String)(args: A*)(implicit dispatchQuery: DispatchQuery = DispatchQuery.empty, callerTextualPseudonym : TextualPseudonym = null): Either[SCROLLError, E] = {
+      if(!(callerTextualPseudonym == null)) rtmeta.textualPseudonym = Some(callerTextualPseudonym.pseutxt)
+      val dispatchResult = performSCROLLDispatch(name)(args)(dispatchQuery)
+      rtmeta.textualPseudonym = None
+      return dispatchResult
+    }
+    
     override def applyDynamicNamed[E](name: String)(args: (String, Any)*)(implicit dispatchQuery: DispatchQuery = DispatchQuery.empty): Either[SCROLLError, E] =
       applyDynamic(name)(args.map(_._2): _*)(dispatchQuery)
 

@@ -1,0 +1,5 @@
+package simplePseudonymity
+
+class RoleManager {
+  
+}
